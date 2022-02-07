@@ -25,4 +25,6 @@ data class LineChartData(
     val startAt = items.minOf { it.date.time }
     val endAt = items.maxOf { it.date.time }
     val last = items.last().value
+
+    operator fun get(idx: Int) = items[idx]
 }

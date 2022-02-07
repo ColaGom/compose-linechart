@@ -3,9 +3,11 @@ package com.example.chart
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.*
 import androidx.compose.runtime.*
@@ -19,7 +21,9 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
@@ -31,6 +35,7 @@ import com.example.chart.chart.*
 import com.example.chart.ui.theme.ChartTheme
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlin.math.min
 import kotlin.random.Random
 
 
@@ -65,7 +70,9 @@ class MainActivity : ComponentActivity() {
                     val (lastOffset, setOffset) = remember {
                         mutableStateOf(Offset.Unspecified)
                     }
-                    val chartPadding = PaddingValues(horizontal = 8.dp)
+                    var selectedValue by remember {
+                        mutableStateOf<Pair<ChartValue, Offset>?>(null)
+                    }
 
                     Column(
                         modifier = Modifier
@@ -102,7 +109,11 @@ class MainActivity : ComponentActivity() {
                                     data = data,
                                     onDrawLast = {
                                         setOffset(it)
-                                    }
+                                    },
+                                    onSelectedValue = { pair ->
+                                        selectedValue = pair
+                                    },
+                                    selected = selectedValue
                                 )
                                 LineChartRightBar(
                                     modifier = Modifier
@@ -129,7 +140,8 @@ class MainActivity : ComponentActivity() {
                                         end.linkTo(chart.end)
                                         start.linkTo(chart.start)
                                     },
-                                data = data
+                                data = data,
+                                selected = selectedValue
                             )
                         }
 
@@ -156,26 +168,35 @@ val sdf = SimpleDateFormat("yyyy/MM/dd")
 fun ChartDateHolder(
     modifier: Modifier,
     data: LineChartData,
-    selected: Date? = null
+    selected: Pair<ChartValue, Offset>? = null,
 ) {
-    if (selected != null) {
-        return
-    }
-
     Row(
         modifier = modifier
     ) {
-        Text(
-            text = sdf.format(data.startAt),
-            fontSize = 12.sp,
-            color = Color.Gray
-        )
-        Spacer(Modifier.weight(1f))
-        Text(
-            text = sdf.format(data.endAt),
-            fontSize = 12.sp,
-            color = Color.Gray
-        )
+        if (selected != null) {
+            val dp = with(LocalDensity.current) { selected.second.x.toDp() }
+            Text(
+                modifier = Modifier
+                    .offset(x = dp)
+                    .adjustToCenterHorizontal(selected.second.x.toInt()),
+                text = sdf.format(selected.first.date),
+                fontSize = 12.sp,
+                color = Color.Gray,
+                fontWeight = FontWeight.Bold
+            )
+        } else {
+            Text(
+                text = sdf.format(data.startAt),
+                fontSize = 12.sp,
+                color = Color.Gray
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                text = sdf.format(data.endAt),
+                fontSize = 12.sp,
+                color = Color.Gray
+            )
+        }
     }
 }
 
@@ -199,7 +220,9 @@ fun LineChartRightBar(
             )
             Spacer(modifier = Modifier.weight(1f))
             Text(
-                modifier = Modifier.fillMaxWidth().adjustToCenter(true),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .adjustToCenter(true),
                 text = low.toString(),
                 textAlign = TextAlign.End,
                 color = Color(0xFFEB303A)
@@ -233,6 +256,15 @@ private fun Modifier.adjustToCenter(reverse: Boolean = false) = layout { measura
     }
 }
 
+private fun Modifier.adjustToCenterHorizontal(remain: Int): Modifier {
+    return layout { measurable, constraints ->
+        val placeable = measurable.measure(constraints)
+        layout(placeable.width, placeable.height) {
+            placeable.placeRelative(-(min(placeable.width / 2, remain)), 0)
+        }
+    }
+}
+
 @Stable
 interface DragListener {
     fun onDrag(offset: Offset)
@@ -240,11 +272,15 @@ interface DragListener {
     fun onDragEnd()
 }
 
+typealias OnSelectedValueListener = (Pair<ChartValue, Offset>?) -> Unit
+
 @Composable
 fun LineChart(
     modifier: Modifier = Modifier,
     data: LineChartData,
     onDrawLast: (Offset) -> Unit,
+    onSelectedValue: OnSelectedValueListener,
+    selected: Pair<ChartValue, Offset>?
 ) {
     val processor = remember(data) {
         LineChartProcessor(data)
@@ -255,7 +291,7 @@ fun LineChart(
     }
 
     val foregroundDecorators = remember(processor) {
-        listOf<ChartDecorator>()
+        listOf<ChartDecorator>(SelectedPointDecorator(processor, onSelectedValue))
     }
 
     InternalLineChart(
@@ -263,7 +299,8 @@ fun LineChart(
         backgroundDecorators = backgroundDecorators,
         foregroundDecorators = foregroundDecorators,
         processor = processor,
-        onDrawLast = onDrawLast
+        onDrawLast = onDrawLast,
+        selected = selected
     )
 }
 
@@ -273,7 +310,8 @@ private fun InternalLineChart(
     processor: LineChartProcessor,
     backgroundDecorators: List<ChartDecorator>,
     foregroundDecorators: List<ChartDecorator> = listOf(),
-    onDrawLast: (Offset) -> Unit
+    onDrawLast: (Offset) -> Unit,
+    selected: Pair<ChartValue, Offset>?
 ) {
     val backgroundDecors = backgroundDecorators.map {
         val childDecors by it.decor.collectAsState(initial = emptyList())
@@ -292,9 +330,22 @@ private fun InternalLineChart(
         }
     }
 
+    val endPointScale =
+        infiniteTransitionValue(initialValue = 0f, targetValue = 1f, durationMillis = 500)
+
+//    val endPointScale = 1f
+
     Canvas(
         modifier = modifier
-//            .border(1.dp, Color.Red)
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onPress = { offset ->
+                        dragListeners.forEach { it.onDragStart(offset) }
+                        awaitRelease()
+                        dragListeners.forEach { it.onDragEnd() }
+                    },
+                )
+            }
             .pointerInput(Unit) {
                 detectDragGestures(
                     onDragStart = { offset -> dragListeners.forEach { it.onDragStart(offset) } },
@@ -312,7 +363,11 @@ private fun InternalLineChart(
             it.draw(this)
         }
 
-        drawLineChart(processor)
+        drawLineChart(
+            Stroke((if (selected == null) 2.0 else 1.4).dp.toPx(), join = StrokeJoin.Round),
+            processor,
+            endPointScale
+        )
 
         foregroundDecors.forEach {
             it.draw(this)
@@ -323,18 +378,20 @@ private fun InternalLineChart(
 }
 
 fun DrawScope.drawLineChart(
+    pathStroke: Stroke = Stroke(2.dp.toPx(), join = StrokeJoin.Round),
     processor: LineChartProcessor,
+    endPointScale: Float,
 ) {
     drawPath(
-        path = processor.path(),
+        path = processor.path,
         color = Color(0xFFFF0045),
-        style = Stroke(2.dp.toPx(), join = StrokeJoin.Round)
+        style = pathStroke
     )
 
     drawCircle(
         color = Color(0xFF707070),
         radius = 4.dp.toPx(),
-        alpha = .6f,
+        alpha = .6f - (.3f * endPointScale),
         center = processor.start
     )
 
@@ -346,14 +403,32 @@ fun DrawScope.drawLineChart(
 
     drawCircle(
         color = Color(0xFF707070),
-        radius = 4.dp.toPx(),
-        alpha = .6f,
+        radius = 4.dp.toPx() + ((2).dp.toPx() * endPointScale),
+        alpha = .6f - (.3f * endPointScale),
         center = processor.end
     )
 
     drawCircle(
         color = Color(0xFFFF0045),
-        radius = 2.dp.toPx(),
+        radius = 2.dp.toPx() + ((0.5).dp.toPx() * endPointScale),
         center = processor.end
     )
+}
+
+@Composable
+fun infiniteTransitionValue(
+    initialValue: Float = 0f,
+    targetValue: Float,
+    durationMillis: Int,
+): Float {
+    val infiniteTransition = rememberInfiniteTransition()
+    val scale: Float by infiniteTransition.animateFloat(
+        initialValue = initialValue,
+        targetValue = targetValue,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        )
+    )
+    return scale
 }

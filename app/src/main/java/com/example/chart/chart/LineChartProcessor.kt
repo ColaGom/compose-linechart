@@ -1,12 +1,15 @@
 package com.example.chart.chart
 
+import android.util.Log
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.runtime.Stable
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.util.lerp
+import kotlin.math.abs
 
 @Stable
 class LineChartProcessor(
@@ -32,15 +35,17 @@ class LineChartProcessor(
 
     val start get() = charItems.first()
     val end get() = charItems.last()
+    var path = Path()
 
-    fun path() = Path().apply {
-        charItems.forEachIndexed { index, offset ->
-            if (index == 0) moveTo(offset.x, offset.y)
-            else lineTo(offset.x, offset.y)
-        }
-    }
+    var prev = Size.Unspecified
 
     override fun process(drawScope: DrawScope) = with(drawScope) {
+        if (prev == size) {
+            return
+        }
+        Log.d("GNO", "process")
+        prev = size.copy()
+
         with(data) {
             padTop = paddingValues.calculateTopPadding().toPx()
             padBottom = paddingValues.calculateBottomPadding().toPx()
@@ -55,6 +60,19 @@ class LineChartProcessor(
 
         charItems = data.items.mapIndexed { index, item ->
             Offset(xOf(index), yOf(item.value))
+        }
+
+        path = Path().apply {
+            charItems.forEachIndexed { index, offset ->
+                if (index == 0) moveTo(offset.x, offset.y)
+                else lineTo(offset.x, offset.y)
+            }
+        }
+    }
+
+    fun nearestValueBy(offset: Offset, withNearestValue: (ChartValue, Offset) -> Unit) {
+        charItems.withIndex().minByOrNull { abs(it.value.x - offset.x) }?.let {
+            withNearestValue(data[it.index], it.value)
         }
     }
 }
