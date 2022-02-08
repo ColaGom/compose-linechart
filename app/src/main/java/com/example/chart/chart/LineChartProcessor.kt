@@ -1,6 +1,5 @@
 package com.example.chart.chart
 
-import android.util.Log
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.runtime.Stable
@@ -12,10 +11,9 @@ import androidx.compose.ui.util.lerp
 import kotlin.math.abs
 
 @Stable
-class LineChartProcessor(
-    private val data: LineChartData
-) : ChartProcessor {
-    lateinit var charItems: List<Offset>
+class LineChartProcessor : ChartProcessor {
+    private lateinit var data: LineChartData
+    private lateinit var charItems: List<Offset>
 
     private var h: Float = 0f
     private var w: Float = 0f
@@ -39,11 +37,15 @@ class LineChartProcessor(
 
     var prev = Size.Unspecified
 
-    override fun process(drawScope: DrawScope) = with(drawScope) {
+    fun setData(data: LineChartData) {
+        this.data = data
+        prev = Size.Unspecified
+    }
+
+    override fun process(scope: DrawScope) = with(scope) {
         if (prev == size) {
             return
         }
-        Log.d("GNO", "process")
         prev = size.copy()
 
         with(data) {

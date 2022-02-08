@@ -6,7 +6,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.unit.dp
-import com.example.chart.DragListener
 import com.example.chart.OnSelectedValueListener
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.*

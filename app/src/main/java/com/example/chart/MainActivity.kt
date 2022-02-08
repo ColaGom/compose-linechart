@@ -6,8 +6,6 @@ import androidx.activity.compose.setContent
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.*
 import androidx.compose.runtime.*
@@ -19,7 +17,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -265,12 +262,6 @@ private fun Modifier.adjustToCenterHorizontal(remain: Int): Modifier {
     }
 }
 
-@Stable
-interface DragListener {
-    fun onDrag(offset: Offset)
-    fun onDragStart(offset: Offset)
-    fun onDragEnd()
-}
 
 typealias OnSelectedValueListener = (Pair<ChartValue, Offset>?) -> Unit
 
@@ -282,25 +273,35 @@ fun LineChart(
     onSelectedValue: OnSelectedValueListener,
     selected: Pair<ChartValue, Offset>?
 ) {
-    val processor = remember(data) {
-        LineChartProcessor(data)
+    val processor = remember {
+        LineChartProcessor()
     }
+    processor.setData(data)
 
+    val foregroundDecorators = remember {
+        listOf<ChartDecorator>(SelectedPointDecorator(processor, onSelectedValue))
+    }
     val backgroundDecorators = remember(data) {
         listOf<ChartDecorator>(DashLineDecorator(700, data))
     }
 
-    val foregroundDecorators = remember(processor) {
-        listOf<ChartDecorator>(SelectedPointDecorator(processor, onSelectedValue))
+    val foregroundDecors by foregroundDecorators.collectFlattenAsState()
+    val backgroundDecors by backgroundDecorators.collectFlattenAsState()
+    val dragListeners by derivedStateOf {
+        mutableListOf<DragListener>().apply {
+            addAll(foregroundDecorators.filterIsInstance<DragListener>())
+            addAll(backgroundDecorators.filterIsInstance<DragListener>())
+        }
     }
 
     InternalLineChart(
         modifier = modifier,
-        backgroundDecorators = backgroundDecorators,
-        foregroundDecorators = foregroundDecorators,
+        backgroundDecors = backgroundDecors,
+        foregroundDecors = foregroundDecors,
         processor = processor,
         onDrawLast = onDrawLast,
-        selected = selected
+        selected = selected,
+        dragListeners = dragListeners
     )
 }
 
@@ -308,54 +309,17 @@ fun LineChart(
 private fun InternalLineChart(
     modifier: Modifier = Modifier,
     processor: LineChartProcessor,
-    backgroundDecorators: List<ChartDecorator>,
-    foregroundDecorators: List<ChartDecorator> = listOf(),
+    backgroundDecors: List<ChartDecor>,
+    foregroundDecors: List<ChartDecor>,
+    dragListeners: Iterable<DragListener>,
     onDrawLast: (Offset) -> Unit,
     selected: Pair<ChartValue, Offset>?
 ) {
-    val backgroundDecors = backgroundDecorators.map {
-        val childDecors by it.decor.collectAsState(initial = emptyList())
-        childDecors
-    }.flatten()
-
-    val foregroundDecors = foregroundDecorators.map {
-        val childDecors by it.decor.collectAsState(initial = emptyList())
-        childDecors
-    }.flatten()
-
-    val dragListeners = remember {
-        mutableListOf<DragListener>().apply {
-            addAll(backgroundDecorators.filterIsInstance<DragListener>())
-            addAll(foregroundDecorators.filterIsInstance<DragListener>())
-        }
-    }
-
     val endPointScale =
         infiniteTransitionValue(initialValue = 0f, targetValue = 1f, durationMillis = 500)
 
-//    val endPointScale = 1f
-
     Canvas(
-        modifier = modifier
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onPress = { offset ->
-                        dragListeners.forEach { it.onDragStart(offset) }
-                        awaitRelease()
-                        dragListeners.forEach { it.onDragEnd() }
-                    },
-                )
-            }
-            .pointerInput(Unit) {
-                detectDragGestures(
-                    onDragStart = { offset -> dragListeners.forEach { it.onDragStart(offset) } },
-                    onDragCancel = { dragListeners.forEach { it.onDragEnd() } },
-                    onDragEnd = { dragListeners.forEach { it.onDragEnd() } },
-                    onDrag = { change, dragAmount ->
-                        dragListeners.forEach { it.onDrag(offset = change.position) }
-                    }
-                )
-            }
+        modifier = modifier.bindDragListener(dragListeners)
     ) {
         processor.process(this)
 

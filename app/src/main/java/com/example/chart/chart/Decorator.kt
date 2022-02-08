@@ -1,5 +1,8 @@
 package com.example.chart.chart
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
@@ -10,15 +13,23 @@ import androidx.compose.ui.util.lerp
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 
 interface ChartProcessor {
-    fun process(drawScope: DrawScope)
+    fun process(scope: DrawScope)
 }
 
 interface ChartDecorator {
     val decor: Flow<List<ChartDecor>>
     fun invalidate()
 }
+
+@Composable
+fun Iterable<ChartDecorator>.collectFlattenAsState() = remember(this) {
+    combine(this.map { it.decor }) {
+        it.asIterable().flatten()
+    }
+}.collectAsState(initial = emptyList())
 
 interface ChartDecor {
     fun draw(scope: DrawScope)
